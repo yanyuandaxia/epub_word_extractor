@@ -149,42 +149,6 @@ def extract_epub_content_by_range(epub_file_path, start_page=None, end_page=None
         return ""
 
 
-def clean_html_content(content):
-    """
-    清理HTML/XHTML标签和特殊字符
-    """
-    # 移除XML声明和DOCTYPE
-    content = re.sub(r'<\?xml[^>]*\?>', '', content)
-    content = re.sub(r'<!DOCTYPE[^>]*>', '', content)
-
-    # 移除CSS样式和JavaScript
-    content = re.sub(r'<style[^>]*>.*?</style>', '',
-                     content, flags=re.DOTALL | re.IGNORECASE)
-    content = re.sub(r'<script[^>]*>.*?</script>',
-                     '', content, flags=re.DOTALL | re.IGNORECASE)
-
-    # 移除HTML标签
-    content = re.sub(r'<[^>]+>', ' ', content)
-
-    # 移除HTML实体
-    html_entities = {
-        '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'",
-        '&nbsp;': ' ', '&mdash;': '-', '&ndash;': '-', '&rsquo;': "'",
-        '&lsquo;': "'", '&rdquo;': '"', '&ldquo;': '"', '&hellip;': '...'
-    }
-
-    for entity, replacement in html_entities.items():
-        content = content.replace(entity, replacement)
-
-    # 移除其他HTML实体
-    content = re.sub(r'&[a-zA-Z0-9#]+;', ' ', content)
-
-    # 移除多余的空白字符
-    content = re.sub(r'\s+', ' ', content)
-
-    return content.strip()
-
-
 def extract_english_words(content):
     """
     提取英文单词
@@ -223,6 +187,109 @@ def extract_english_words(content):
             unique_words.append(word)
 
     return unique_words
+
+
+def extract_vocabulary_entries(content):
+    """
+    提取词汇条目中的英文单词
+    支持多种常见的词汇书格式
+    """
+    vocabulary_words = []
+
+    # 模式1: <p class="bodytext">word <span class="yinbiao">/pronunciation/</span> part_of_speech. definition</p>
+    pattern1 = r'<p\s+class="bodytext"[^>]*>([a-zA-Z]+(?:[-\'][a-zA-Z]+)*)\s*<span\s+class="yinbiao"[^>]*>.*?</span>.*?</p>'
+    matches1 = re.findall(pattern1, content, re.IGNORECASE | re.DOTALL)
+    vocabulary_words.extend(matches1)
+
+    # 模式2: <p class="bodytext"><span class="text-title1">搭配</span> phrase 中文释义</p>
+    pattern2 = r'<p\s+class="bodytext"[^>]*><span\s+class="text-title1"[^>]*>[^<]*</span>\s*([a-zA-Z]+(?:\s+[a-zA-Z]+)*(?:\s*[-\'][a-zA-Z]+)*)\s+[\u4e00-\u9fff].*?</p>'
+    matches2 = re.findall(pattern2, content, re.IGNORECASE | re.DOTALL)
+    vocabulary_words.extend(matches2)
+
+    return vocabulary_words
+
+
+def clean_html_content(content):
+    """
+    为备用方案清理HTML/XHTML标签和特殊字符
+    """
+    # 移除XML声明和DOCTYPE
+    content = re.sub(r'<\?xml[^>]*\?>', '', content)
+    content = re.sub(r'<!DOCTYPE[^>]*>', '', content)
+
+    # 移除CSS样式和JavaScript
+    content = re.sub(r'<style[^>]*>.*?</style>', '',
+                     content, flags=re.DOTALL | re.IGNORECASE)
+    content = re.sub(r'<script[^>]*>.*?</script>',
+                     '', content, flags=re.DOTALL | re.IGNORECASE)
+
+    # 移除HTML标签
+    content = re.sub(r'<[^>]+>', ' ', content)
+
+    # 移除HTML实体
+    html_entities = {
+        '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'",
+        '&nbsp;': ' ', '&mdash;': '-', '&ndash;': '-', '&rsquo;': "'",
+        '&lsquo;': "'", '&rdquo;': '"', '&ldquo;': '"', '&hellip;': '...'
+    }
+
+    for entity, replacement in html_entities.items():
+        content = content.replace(entity, replacement)
+
+    # 移除其他HTML实体
+    content = re.sub(r'&[a-zA-Z0-9#]+;', ' ', content)
+
+    # 移除多余的空白字符
+    content = re.sub(r'\s+', ' ', content)
+
+    return content.strip()
+
+
+def extract_words_from_content(content):
+    """
+    从内容中提取单词，优先使用结构化提取，备用通用提取
+    """
+    # 首先尝试从词汇条目中提取
+    vocabulary_words = extract_vocabulary_entries(content)
+
+    if vocabulary_words:
+        print(f"从词汇条目中提取到 {len(vocabulary_words)} 个原始单词")
+
+        # 过滤和清理词汇条目中的单词
+        filtered_words = []
+        for word in vocabulary_words:
+            word = word.strip()
+
+            # 过滤掉太短的单词
+            if len(word) < 2:
+                continue
+
+            # 过滤掉包含数字的单词
+            if re.search(r'\d', word):
+                continue
+
+            # 过滤掉常见的非单词内容
+            if word in ['www', 'http', 'https', 'com', 'org', 'net', 'html', 'css', 'js']:
+                continue
+
+            filtered_words.append(word)
+
+        print(f"过滤后剩余 {len(filtered_words)} 个有效单词")
+
+        # 去除重复但保持原有顺序
+        seen = set()
+        unique_words = []
+        for word in filtered_words:
+            if word not in seen:
+                seen.add(word)
+                unique_words.append(word)
+
+        return unique_words
+    else:
+        print("未找到标准词汇条目格式，使用备用提取方法...")
+        # 备用方案：使用原来的通用提取方法
+        cleaned_content = clean_html_content(content)
+        return extract_english_words(cleaned_content)
 
 
 def save_words_to_file(words, output_file):
@@ -395,13 +462,9 @@ def main():
 
     print(f"提取到的内容长度: {len(content)} 字符")
 
-    # 清理HTML内容
-    print("正在清理内容...")
-    cleaned_content = clean_html_content(content)
-
     # 提取英文单词
     print("正在提取英文单词...")
-    words = extract_english_words(cleaned_content)
+    words = extract_words_from_content(content)
 
     if not words:
         print("警告: 未找到任何英文单词")
